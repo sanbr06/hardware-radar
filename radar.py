@@ -1,49 +1,26 @@
 import requests
 import re
+import json
+import os
 from datetime import datetime
 
 TOKEN="SEU_TOKEN"
 CHAT_ID="5965060661"
 
-headers={
-"User-Agent":"Mozilla/5.0"
-}
+HEADERS={"User-Agent":"Mozilla/5.0"}
 
-def alerta(msg):
+ARQUIVO="historico_precos.json"
 
-    url=f"https://api.telegram.org/bot8735265703:AAF-iaDIDuDLujTSzAuShHSSdcXtTr7HDag/sendMessage"
+
+def telegram_foto(msg,foto):
+
+    url=f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
     requests.post(url,data={
         "chat_id":CHAT_ID,
-        "text":msg
+        "caption":msg,
+        "photo":foto
     })
-
-
-def extrair_preco(html):
-
-    precos=re.findall(r"R\$ ?[0-9\.,]+",html)
-
-    valores=[]
-
-    for p in precos:
-
-        v=p.replace("R$","").replace(".","").replace(",",".").strip()
-
-        try:
-            valor=float(v)
-
-            # evita pegar parcelas
-            if valor > 300:
-                valores.append(valor)
-
-        except:
-            pass
-
-    if valores:
-        return max(valores)
-
-    return None
-
 
 
 def identificar_loja(url):
@@ -62,13 +39,48 @@ def identificar_loja(url):
     return "Loja"
 
 
+def extrair_precos(html):
+
+    precos=re.findall(r"R\$ ?[0-9\.,]+",html)
+
+    valores=[]
+
+    for p in precos:
+
+        v=p.replace("R$","").replace(".","").replace(",",".").strip()
+
+        try:
+
+            valor=float(v)
+
+            if valor>150:
+                valores.append(valor)
+
+        except:
+            pass
+
+    return valores
+
+
+def extrair_imagem(html):
+
+    img=re.search(r'https://http[^"]+\.(jpg|png)',html)
+
+    if img:
+        return img.group()
+
+    return None
+
+
 produtos={
 
-"🖥️ Ryzen 5 7600":[
+"🖥 Ryzen 7600":[
 
 "https://www.kabum.com.br/busca/ryzen-7600",
 "https://www.pichau.com.br/search?q=ryzen%207600",
-"https://www.terabyteshop.com.br/busca?str=ryzen+7600"
+"https://www.terabyteshop.com.br/busca?str=ryzen+7600",
+"https://www.amazon.com.br/s?k=ryzen+7600",
+"https://lista.mercadolivre.com.br/ryzen-7600"
 
 ],
 
@@ -76,25 +88,35 @@ produtos={
 
 "https://www.kabum.com.br/busca/rx-7600",
 "https://www.pichau.com.br/search?q=rx%207600",
-"https://www.terabyteshop.com.br/busca?str=rx+7600"
+"https://www.terabyteshop.com.br/busca?str=rx+7600",
+"https://www.amazon.com.br/s?k=rx+7600",
+"https://lista.mercadolivre.com.br/rx-7600"
 
 ],
 
-"🧠 DDR5 2x8GB":[
+"🧠 DDR5 8GB 5200MHz":[
 
-"https://www.kabum.com.br/busca/ddr5-16gb-2x8",
-"https://www.pichau.com.br/search?q=ddr5%202x8",
-"https://www.terabyteshop.com.br/busca?str=ddr5+2x8"
+"https://www.kabum.com.br/busca/ddr5-8gb-5200",
+"https://www.pichau.com.br/search?q=ddr5%208gb%205200",
+"https://www.terabyteshop.com.br/busca?str=ddr5+8gb+5200",
+"https://www.amazon.com.br/s?k=ddr5+8gb+5200",
+"https://lista.mercadolivre.com.br/ddr5-8gb-5200"
 
 ]
 
 }
 
 
+if os.path.exists(ARQUIVO):
+
+    historico=json.load(open(ARQUIVO))
+
+else:
+
+    historico={}
+
 
 hora=datetime.now().strftime("%d/%m %H:%M")
-
-alerta(f"🛰️ Radar de Hardware ativo\n⏱️ {hora}\n🔎 Iniciando varredura...")
 
 
 for produto,urls in produtos.items():
@@ -103,39 +125,53 @@ for produto,urls in produtos.items():
 
         try:
 
-            r=requests.get(url,headers=headers,timeout=10)
+            r=requests.get(url,headers=HEADERS,timeout=10)
 
             html=r.text
 
-            preco=extrair_preco(html)
+            precos=extrair_precos(html)
+
+            if not precos:
+                continue
+
+            preco=min(precos)
 
             loja=identificar_loja(url)
 
-            if preco:
+            chave=f"{produto}-{loja}"
 
-                mensagem=f"""
-🔥 POSSÍVEL OFERTA DETECTADA
+            preco_antigo=historico.get(chave)
+
+            if preco_antigo and preco>=preco_antigo:
+                continue
+
+            historico[chave]=preco
+
+            imagem=extrair_imagem(html)
+
+            mensagem=f"""
+🚨 ALERTA DE OFERTA
 
 📦 Produto
 {produto}
 
-💰 Preço encontrado
-R$ {preco}
-
 🏪 Loja
 {loja}
 
-🔗 Ver oferta
+💰 Preço
+R$ {preco}
+
+🔗 Link
 {url}
 
-⏱️ Detectado em
-{hora}
-
-🤖 Radar automático
+⏰ {hora}
 """
 
-                alerta(mensagem)
+            if imagem:
+                telegram_foto(mensagem,imagem)
 
         except:
-
             pass
+
+
+json.dump(historico,open(ARQUIVO,"w"))
